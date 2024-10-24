@@ -5,18 +5,21 @@ library(tidyr)
 library(caret)
 library(parallel)
 library(logistf)
+## load specific libraries for Mixed effect regression model
+library(Matrix)
+library(Rcpp)
+library(StanHeaders)
+library(rstan)
+library(lme4)
+library(brms)
 							      
-
-                    
 #genetic features used which comprise the SE-GPS
 # geneticpredictors=c('clinicalvariant', 'hgmd', 'omim','geneburden_ot', 'geneburden_ravar','singlevar_gb', 'singleva_ravar','eqtl_phenotype','locus2gene')
 geneticpredictors=c('clinicalvariant', 'geneburden', 'singlevar','eqtl_phenotype','locus2gene')
-
 #genetic features used which comprise the GPS-direction of effect
 geneticpredictors_doe=c('clinicalvariant_doe','geneburden_doe','singlevar_doe','eqtl_phenotype_doe','locus2gene_doe')
-
 #phecode categories used as covariates in regression models
-covariates=c('categorycongenital_anomalies','categorydermatologic','categorydigestive','categoryendocrine_metabolic','categorygenitourinary','categoryhematopoietic','categorymental_disorders','categorymusculoskeletal','categoryneoplasm', 'categoryneurological','categoryrespiratory','categorysense_organs','categorysymptoms')
+covariates=c('Blood/Immune','Cardiovascular','Congenital','Dermatological','Endocrine/Metab','Gastrointestinal','Genetic','Genitourinary','Infections','Mental','Muscloskeletal','Neurological','Respiratory','Sense organs','Symptoms')
 #Make clinicalvariant predictor
 clincicalpred=c('clinvar', 'hgmd', 'omim')
 dataset$clinicalvariant=0
@@ -35,38 +38,27 @@ dataset$singlevar[rowSums(dataset[, singlevar]) != 0]<-1
 #SE no main indication outcome
 dataset$senomi=ifelse(dataset$se==1 & dataset$mi.phase4!=1,1,0)
 
-
-## Make Clinical Variant pre
- dataset$clinicalvariant_DOE=0
- dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == 1]<-1
- dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == 2]<-2
- dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == 3]<-3
- dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == 0]<-0
-
- dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == -1]<--1
- dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == -2]<--2
- dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == -3]<--3
-
+#Make clinicalvariant predictor for DOE analysis
+dataset$clinicalvariant_DOE=0
+dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == 1]<-1
+dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == 2]<-2
+dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == 3]<-3
+dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == 0]<-0
+dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == -1]<--1
+dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == -2]<--2
+dataset$clinicalvariant_DOE[rowSums(dataset[, clincicalpred_DOE]) == -3]<--3
+#Make geneburden predictor for DOE analysis
 geneburden_doe=c('OTgeneburden_doe','ravar_genburden')
 dataset$geneburden_doe=0
 dataset$geneburden_doe[rowSums(dataset[, geneburden_doe]) != 0]<-1
-
+#Make singlevariant predictor for DOE analysis
 singlevar_doe=c('ravar_snp_predicted','genebass_predicted')
 dataset$singlevar_doe=0
 dataset$singlevar_doe[rowSums(dataset[, singlevar_doe]) > 0]<-1
 dataset$singlevar_doe[rowSums(dataset[, singlevar_doe]) < 0]<--1
 
-
 # Analysis 1a-1e: Code required to run five-fold cross-validation (CV) model to construct the side effect genetic priority score (SE-GPS) using the Open Targets dataset and then applied to OnSIDES and the all genes dataset (19,422 protein-coding genes and 470 drug side side effects).
 # Analysis 1a: Get weights for each of the 5-CV Open target datasets 
-## load specific libraries for regression model
-library(Matrix)
-library(Rcpp)
-library(StanHeaders)
-library(rstan)
-library(lme4)
-library(brms)
-
 Mixedmodelreg_weights<-mclapply(c(paste0('CVsample',rep(1:5))), function(CVsample){
   OT_dataset=fread(paste0('OT_drugdataset_80_CV', CVsample, '.txt'),data.table=F) #80% training Open target dataset 
   #genetic features + phecode category covariates
@@ -78,9 +70,7 @@ Mixedmodelreg_weights<-mclapply(c(paste0('CVsample',rep(1:5))), function(CVsampl
 }, mc.cores=10)
 
 #Analysis 1b: Use weights from Mixedmodel and create score using remaining 20% of data for each CV
-
 Genescore_sum<-lapply(c(paste0('CVsample',rep(1:5))), function(CVsample){
-
   Mixedmodel<-fread(paste0('Mixedmodel_weights_Opentargets_',CVsample,'.txt'),data.table=F) #weights from CV sample
   Mixedmodel=Mixedmodel %>% select(V1, beta) %>% rename(predictor=V1)
   Mixedmodel_weights=as.data.frame(t(Mixedmodel$beta))
@@ -94,7 +84,6 @@ Genescore_sum<-lapply(c(paste0('CVsample',rep(1:5))), function(CVsample){
   #sum all predictor values for each gene - phenotype row
   Genescores_beta_genetic$genescoresum=rowSums(Genescores_beta_genetic[, !names(Genescores_beta_genetic) %in% c("gene", "parentterm")])
   write.table(Genescores_beta_genetic, paste0('Genescore_sum_across_predictor_Opentargets_',CVsample,'.txt'), sep='\t', row.names=F, quote=F )
-
 })
 
 #Analysis 1c: Choose the CV sample with the max OR for validation set
@@ -114,7 +103,6 @@ max_filetype<-max_filetype[order(max_filetype$OR, decreasing=T),]
 OT_CV=as.character(max_filetype$CV[1])
 
 #Analysis 1d: Combine 5-CV 20% datasets to create one dataset
-
 #scores with predictors 
 Combine_genescores<-lapply(paste0('CVsample', seq(1:5)), function(CVsample){
   OT_dataset_20=fread(paste0('OT_drugdataset_20_CV', CVsample, '.txt'),data.table=F)
@@ -139,7 +127,6 @@ Combine_genescores_nopredictors1<-do.call(rbind.fill,Combine_genescores_nopredic
 write.table(Combine_genescores_nopredictors1, gzfile(paste0('All_genescoresum_opentargets.txt.gz')), sep='\t',quote=F,row.names=F)
 
 #Analysis 1e: Calculate GPS in OnSIDES dataset and all genes dataset using the OT mixedmodel weights from Analysis 1c which gave the max OR 
-
 samplecv=OT_CV
 Mixedmodel<-fread(paste0('Mixedmodel_weights_Opentargets_',samplecv,'.txt'),data.table=F)
 Mixedmodel=Mixedmodel %>% select(V1, beta) %>% rename(predictor=V1)
@@ -155,7 +142,7 @@ Genescore_sum<-lapply(c('OnSIDES','Allgenes'), function(valdataset){
   #sum all predictor values for each gene - phenotype row
   Genescores_beta_genetic$genescoresum=rowSums(Genescores_beta_genetic[, !names(Genescores_beta_genetic) %in% c("gene", "parentterm")])
   write.table(Genescores_beta_genetic, paste0('All_genescoresum_across_all_predictors_',valdataset,'.txt'), sep='\t', row.names=F, quote=F )
-    #for OnSIDES add GPS sum to the OnSIDES-drug dataset with mi
+    #for OnSIDES add GPS sum to the OnSIDES-drug dataset with SE outcome
   if(valdataset=='OnSIDES'){
   Genescores_beta_genetic_genept=Validation_dataset %>% distinct(gene, parentterm, genescoresum) 
   genescorefile_drugs=inner_join(Validation_dataset[c('drugname','gene','parentterm','category','se','mi','senomi')],Genescores_beta_genetic_genept, by=c('gene', 'parentterm'))
@@ -166,15 +153,12 @@ Genescore_sum<-lapply(c('OnSIDES','Allgenes'), function(valdataset){
 #Analysis 2a-2e: Create SE-GPS-DOE
 ###For score GOF annotated as -1, LOF annotated as +1 and missing/no evidence/neutral annotated as 0
 ### when calculating weights GOF/LOF recorded as 1
-
 #Analysis 2a: Get weights for each of the 5-CV Open target datasets 
 Mixedmodelreg_weights_doe<-mclapply(c(paste0('CVsample',rep(1:5))), function(CVsample){
-
   OT_dataset_doe=fread(paste0('OT_drugdataset_80_CV', CVsample, '_doe.txt'),data.table=F) #80% training Open target dataset. Restricted to drugs with activator/inhibitor mechanism 
   OT_dataset_doe[8:15][OT_dataset_doe[8:15]=='GOF'] <- 1
   OT_dataset_doe[8:15][OT_dataset_doe[8:15]=='LOF'] <- 1
   OT_dataset_doe[8:15][OT_dataset_doe[8:15]=='Neutral'] <-0
- 
   #genetic features + phecode category covariates
   Predictors_doe=paste(paste(geneticpredictors_doe,collapse='+'), '+', paste(covariates,collapse='+'),collapse='+' )
    ##Run mixedmodel regression across each CV training dataset to get weights - don't take DOE into account here
@@ -201,7 +185,6 @@ Genescore_sum<-lapply(c(paste0('CVsample',rep(1:5))), function(CVsample){
   #sum all predictor values for each gene - phenotype row
   Genescores_beta_genetic$genescoresum=rowSums(Genescores_beta_genetic[, !names(Genescores_beta_genetic) %in% c("gene", "parentterm","moa")])
   write.table(Genescores_beta_genetic, paste0('Genescore_sum_across_predictor_Opentargets_',CVsample,'_doe.txt'), sep='\t', row.names=F, quote=F )
-
 })
 
 #Analysis 2c: Choose the CV sample with the max OR for validation set
@@ -222,7 +205,6 @@ max_filetype_doe<-max_filetype_doe[order(max_filetype_doe$OR, decreasing=T),]
 OT_CV_doe=as.character(max_filetype_doe$CV[1])
 
 #Analysis 2d: Combine 5-CV 20% datasets to create one dataset
-
 #scores with predictors 
 Combine_genescores_doe<-lapply(paste0('CVsample', seq(1:5)), function(CVsample){
   OT_dataset_20=fread(paste0('OT_drugdataset_20_CV', CVsample, '_doe.txt'),data.table=F)
@@ -246,8 +228,7 @@ Combine_genescores_nopredictors_doe<-lapply(paste0('CVsample', seq(1:5)), functi
 Combine_genescores_nopredictors_doe1<-do.call(rbind.fill,Combine_genescores_nopredictors_doe)
 write.table(Combine_genescores_nopredictors_doe1, gzfile(paste0('All_genescoresum_opentargets_doe.txt.gz')), sep='\t',quote=F,row.names=F)
 
-#Analysis 2e: Calculate GPS-D in OnSIDES dataset and all genes dataset using the OT firth weights from Analysis 2c which gave the max OR 
-
+#Analysis 2e: Calculate SE-GPS-DOE in OnSIDES dataset and all genes dataset using the OT firth weights from Analysis 2c which gave the max OR 
 samplecv=OT_CV_doe
 Mixedmodel_doe<-fread(paste0('Mixedmodel_weights_Opentargets_',samplecv,'_doe.txt'),data.table=F)
 Mixedmodel_doe=Mixedmodel_doe %>% select(V1, beta) %>% rename(predictor=V1)
